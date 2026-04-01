@@ -8,8 +8,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,7 +65,6 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG,"has overLay permission : $hasOverLayPermission")
         if (!hasOverLayPermission) {
             Toast.makeText(this, "Necesitamos permiso de overlay", Toast.LENGTH_LONG).show()
-            openOverlayPermissionScreen()
         } else{
             checkAccessibilitySettings()
         }
@@ -72,10 +75,6 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "is accessibility service enabled : ${isAccessibilityServiceEnabled()}")
         if (!isAccessibilityServiceEnabled()) {
             Toast.makeText(this, "Necesitamos encender el servicio", Toast.LENGTH_LONG).show()
-            openAccessibilityServiceScreen()
-
-        } else {
-            Toast.makeText(this, "servicio encendido", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -100,40 +99,99 @@ class MainActivity : ComponentActivity() {
         startActivity(intent)
     }
 
+    fun openBatteryOptimizationScreen(){
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        startActivity(intent)
+    }
+
+    fun openAutoStartScreen(){
+        try {
+            val intent = Intent().apply {
+                component = android.content.ComponentName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                )
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "No disponible en este dispositivo", Toast.LENGTH_SHORT).show()
+        }
+    }
+
 
 
     @Composable
     fun Greeting(name: String, modifier: Modifier = Modifier) {
-        Box(
+
+        Column(
             modifier = modifier.fillMaxSize()
         ) {
 
-            // Texto centrado (opcional, puedes moverlo si quieres)
-            Text(
-                text = "Hello $name!",
-                modifier = Modifier.align(Alignment.Center)
-            )
-
-            // Botón en esquina inferior derecha
-            Button(
-                onClick = { openOverlayPermissionScreen() },
+            // 🔷 Caja superior (1/3)
+            Column(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Text("dar permiso de overLay")
+                Text(text = "Hello $name!")
             }
-            Button(
-                onClick = { openAccessibilityServiceScreen() },
+
+            // 🔶 Caja inferior (2/3)
+            Box(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(16.dp)
+                    .weight(2f)
+                    .fillMaxWidth()
             ) {
-                Text("activar el servicio")
+
+                // 🧠 Grid de botones (2 filas x 2 columnas)
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { openOverlayPermissionScreen() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Overlay")
+                        }
+
+                        Button(
+                            onClick = { openAccessibilityServiceScreen() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Accesibilidad")
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { openBatteryOptimizationScreen() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Optimización batería")
+                        }
+
+                        Button(
+                            onClick = { openAutoStartScreen() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Inicio automático")
+                        }
+                    }
+                }
             }
         }
     }
-
 
 
 
