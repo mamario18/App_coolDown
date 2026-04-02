@@ -2,6 +2,7 @@ package com.themaelo.colddown
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.PixelFormat
+import android.os.CountDownTimer
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -11,70 +12,120 @@ import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
 import android.widget.Toast
 
-
-
 class BlockAppAccessibilityService : AccessibilityService() {
 
-    // tag para logs
     private val tag = this::class.java.simpleName
 
+    private val tiktokPackageName = "com.zhiliaoapp.musically"
+    private var lastPackage: String? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
-    private var stateOverlay = false
-    //private val myPackageName by lazy { applicationContext.packageName }
-    private val tiktokPackageName = "musically"
-    private var lastPackage : String? = null
+    val SECOND = 1000L
 
-    private lateinit var windowManager : WindowManager
-    private lateinit var overLayView : View
-    private lateinit var params : WindowManager.LayoutParams
+    private var allowedTime = 15000L // default
+    private var coolDown = 15000L    // default
+    private var timeUsingTiktok = 0L
 
-    /**
-     * Se ejecuta cuando el sistema conecta correctamente este servicio.
-     * Aquí se pueden inicializar configuraciones o estado del servicio.
-     */
+    private var isOverlayShow = false
+    private var shouldBlockTikTok = false
+    private var isTiktokTimerRunning = false
+    private var isCooldownRunning = false
+
+    private lateinit var tiktokTimer: CountDownTimer
+
+    private lateinit var windowManager: WindowManager
+    private lateinit var overLayView: View
+    private lateinit var params: WindowManager.LayoutParams
+    private lateinit var eventPackageName: String
+
+    // ----------------------------------
     override fun onServiceConnected() {
         super.onServiceConnected()
-
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        loadSettings()                 // 🔹 cargar configuración editable
+        initializeCountDownTimer()
         initializeOverlay()
         logToastnotifyServiceConnected()
+        startFailsafe()
     }
 
-
-    /**
-     * Callback que recibe eventos del sistema según la configuración del servicio.
-     * Aquí detectamos qué aplicación se abre.
-     */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
-        if(event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED )return
-        val packageName = event.packageName?.toString() ?: return
-
-        if (packageName == lastPackage) return
-        lastPackage = packageName
+        eventPackageName = event.packageName?.toString() ?: return
+        if (eventPackageName == lastPackage) return
+        lastPackage = eventPackageName
 
         logEventInfo(event)
-
-        handleAppBlocking(packageName)
+        handleAppBlocking(eventPackageName)
     }
 
+    override fun onInterrupt() {
+        Log.d(tag, "Servicio interrumpido")
+    }
 
-    private fun initializeOverlay(){
+    // ----------------------------------
+    private fun handleAppBlocking(packageName: String) {
+        if (packageName != tiktokPackageName) return
+        if (shouldBlockTikTok) blockTiktok()
+        else if (!isTiktokTimerRunning) {
+            tiktokTimer.start()
+            isTiktokTimerRunning = true
+        }
+    }
+
+    private fun blockTiktok() {
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        showOverlay()
+        if (!isCooldownRunning) startCoolDown()
+    }
+
+    private fun startCoolDown() {
+        isCooldownRunning = true
+        handler.postDelayed({
+            shouldBlockTikTok = false
+            isCooldownRunning = false
+        }, coolDown)
+    }
+
+    private fun initializeCountDownTimer() {
+        tiktokTimer = object : CountDownTimer(allowedTime, SECOND) {
+            override fun onTick(millisUntilFinished: Long) {
+                timeUsingTiktok = allowedTime - millisUntilFinished
+            }
+
+            override fun onFinish() {
+                shouldBlockTikTok = true
+                isTiktokTimerRunning = false
+                timeUsingTiktok = 0L
+                blockTiktok()
+            }
+        }
+    }
+
+    private fun stopTikTokTimer() {
+        if (isTiktokTimerRunning) {
+            tiktokTimer.cancel()
+            isTiktokTimerRunning = false
+            timeUsingTiktok = 0L
+        }
+    }
+
+    // ----------------------------------
+    private fun initializeOverlay() {
         createOverlayView()
-        setupoOverlayView()
+        setupOverlayView()
     }
 
-    private fun createOverlayView(){
+    private fun createOverlayView() {
         val parent = FrameLayout(this)
         overLayView = LayoutInflater.from(this)
             .inflate(R.layout.overlay_block, parent, false)
-
-        overlaySetOnTouchListener()
+        removeOverlayWithOnTouch()
     }
 
-    private fun setupoOverlayView(){
+    private fun setupOverlayView() {
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -85,21 +136,12 @@ class BlockAppAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun handleAppBlocking(packageName: String){
-        if (!packageName.contains(tiktokPackageName)) return
-        performGlobalAction(GLOBAL_ACTION_HOME)
-
-        showOverlay()
-    }
-
     private fun showOverlay() {
-        if (stateOverlay) return
-
+        if (isOverlayShow) return
         try {
             windowManager.addView(overLayView, params)
-            stateOverlay = true
+            isOverlayShow = true
             logStateOverlay()
-
             removeOverlayWithDelay()
         } catch (e: Exception) {
             Log.e(tag, "Error al agregar overlay", e)
@@ -108,69 +150,64 @@ class BlockAppAccessibilityService : AccessibilityService() {
 
     private fun removeOverlayWithDelay() {
         handler.removeCallbacksAndMessages(null)
-
-        handler.postDelayed({
-            removeOverlay()
-        }, 5000)
+        handler.postDelayed({ removeOverlay() }, 5000)
     }
 
-    private fun overlaySetOnTouchListener(){
+    private fun removeOverlayWithOnTouch() {
         overLayView.setOnTouchListener { v, event ->
             if (event.action == MotionEvent.ACTION_UP) {
                 v.performClick()
-
                 removeOverlay()
             }
             true
         }
     }
 
-    private fun removeOverlay(){
-        if (stateOverlay) {
-            try {
-                windowManager.removeView(overLayView)
-                stateOverlay = false
-                logStateOverlay()
-            } catch (e: Exception) {
-                Log.e(tag, "Error al remover overlay", e)
+    private fun removeOverlay() {
+        if (!isOverlayShow) return
+        try {
+            windowManager.removeView(overLayView)
+            isOverlayShow = false
+            logStateOverlay()
+        } catch (e: Exception) {
+            Log.e(tag, "Error al remover overlay (failsafe)", e)
+            isOverlayShow = false
+        }
+    }
+
+    // ----------------------------------
+    private fun startFailsafe() {
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                if (isOverlayShow) {
+                    removeOverlay()
+                    Log.w(tag, "Failsafe activado: overlay removido automáticamente")
+                }
+                stopTikTokTimer()
+                handler.postDelayed(this, 10000L)
             }
-        }
+        }, 10000L)
     }
 
-    private fun logToastnotifyServiceConnected(){
+    // ----------------------------------
+    private fun loadSettings() {
+        val prefs = getSharedPreferences("TikTokBlockPrefs", MODE_PRIVATE)
+        allowedTime = prefs.getLong("allowedTime", 15000L)
+        coolDown = prefs.getLong("coolDown", 15000L)
+    }
+
+    // ----------------------------------
+    private fun logToastnotifyServiceConnected() {
         Toast.makeText(this, "servicio encendido", Toast.LENGTH_LONG).show()
-
-        Log.d(tag, "                       ")
-        Log.d(tag, "+++++++++++++++++++++++")
         Log.d(tag, "Servicio conectado correctamente")
-        Log.d(tag, "+++++++++++++++++++++++")
-        Log.d(tag, "                       ")
     }
 
-    private fun logEventInfo(event: AccessibilityEvent){
-        Log.d(tag, "Evento de cambio de pantalla")
-        Log.d(tag, "Cambio de pantalla por${event.packageName} ")
-        Log.d(tag, "+++++++++++++++++++++++")
-        Log.d(tag, "                       ")
-    }
-    private fun logStateOverlay(){
-        if (stateOverlay) {
-            Log.d(tag, "overlay mostrado")
-            Log.d(tag, "+++++++++++++++++++++++")
-            Log.d(tag, "                       ")
-        }else{
-            Log.d(tag, "overlay quitado")
-            Log.d(tag, "+++++++++++++++++++++++")
-            Log.d(tag, "                       ")
-        }
+    private fun logEventInfo(event: AccessibilityEvent) {
+        Log.d(tag, "Cambio de pantalla por ${event.packageName}")
     }
 
-
-
-    /**
-     * Llamado cuando el sistema interrumpe el servicio.
-     */
-    override fun onInterrupt() {
-        Log.d(tag, "Servicio interrumpido")
+    private fun logStateOverlay() {
+        if (isOverlayShow) Log.d(tag, "overlay mostrado")
+        else Log.d(tag, "overlay quitado")
     }
 }
